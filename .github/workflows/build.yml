@@ -1,0 +1,65 @@
+name: Build APK
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Unpack ZIP archive
+        run: |
+          ZIP_FILE=$(find . -maxdepth 3 -type f -iname "*.zip" -printf '%T@ %p\n' | sort -nr | head -n 1 | cut -d' ' -f2-)
+
+          if [ -z "$ZIP_FILE" ]; then
+            echo "ZIP-архив не найден, используем файлы из репозитория."
+          else
+            echo "Распаковываем архив: $ZIP_FILE"
+            unzip -o "$ZIP_FILE" -d unpacked
+
+            FIRST_DIR=$(find unpacked -mindepth 1 -maxdepth 1 -type d | head -n 1)
+            DIR_COUNT=$(find unpacked -mindepth 1 -maxdepth 1 -type d | wc -l)
+            if [ "$DIR_COUNT" -eq 1 ] && [ ! -f "unpacked/settings.gradle" ] && [ ! -f "unpacked/settings.gradle.kts" ]; then
+              cp -rf "$FIRST_DIR"/. .
+            else
+              cp -rf unpacked/. .
+            fi
+            rm -rf unpacked
+          fi
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - name: Accept Android SDK licenses
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+
+      - name: Build release APK
+        run: |
+          if [ ! -f "settings.gradle" ] && [ ! -f "settings.gradle.kts" ]; then
+            PROJECT_DIR=$(find . -maxdepth 4 \( -name "settings.gradle" -o -name "settings.gradle.kts" \) -not -path '*/.*' | head -n 1 | xargs -r dirname)
+            if [ -n "$PROJECT_DIR" ]; then
+              cd "$PROJECT_DIR"
+            else
+              echo "ОШИБКА: settings.gradle / settings.gradle.kts не найден."
+              find . -maxdepth 3 -not -path '*/.*'
+              exit 1
+            fi
+          fi
+          gradle --no-daemon assembleRelease assembleDebug
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DV_OnePlus_Lite_hybrid
+          path: |
+            **/app/build/outputs/apk/release/*.apk
+            **/app/build/outputs/apk/debug/*.apk
+            
